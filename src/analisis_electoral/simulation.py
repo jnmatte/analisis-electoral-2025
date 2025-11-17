@@ -45,6 +45,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     parser.add_argument("--pact-a", required=True, help="Código del primer pacto (por ejemplo C)")
     parser.add_argument("--pact-b", required=True, help="Código del segundo pacto (por ejemplo J)")
+    parser.add_argument(
+        "--print-all",
+        action="store_true",
+        help=(
+            "Muestra todos los distritos aunque no cambie el resultado. Por defecto solo se "
+            "imprimen los que presentan cambios."
+        ),
+    )
     args = parser.parse_args(argv)
 
     circunscripciones = load_circunscripciones(args.inputs)
@@ -77,6 +85,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         original_winners = _winners_by_pact(circ.pacts, original_allocation)
         merged_winners = _winners_by_pact(merged_pacts, merged_allocation)
         has_changes = _has_result_changes(original_winners, merged_winners)
+        should_print = args.print_all or has_changes
 
         merged_breakdown = _merged_breakdown_counts(merged_label, merged_winners)
         if merged_breakdown:
@@ -89,7 +98,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
         summary_scenario_by_origin.update(distributed_allocation)
 
-        if not has_changes:
+        if not should_print:
             continue
 
         print(f"\n=== {circ.circunscripcion_label} ({circ.seats} escaños) ===")
@@ -106,20 +115,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         _print_merged_breakdown(merged_label, merged_breakdown)
 
         if not has_changes:
-            continue
-
-        print(f"\n=== {circ.circunscripcion_label} ({circ.seats} escaños) ===")
-        _print_pact_table(circ.pacts)
-
-        print("\n> Resultado oficial con los pactos originales:")
-        _print_allocation(original_allocation, circ.pacts)
-
-        print("\n> Escenario si se unen {0}:".format(" + ".join(sorted(pact_codes))))
-        _print_allocation(merged_allocation, merged_pacts)
-
-        _print_winners("Electos oficiales", original_winners)
-        _print_winners("Electos en el escenario", merged_winners)
-        _print_merged_breakdown(merged_label, merged_breakdown)
+            print("\n   No hay cambios respecto al resultado oficial.")
 
     if processed_any:
         _print_summary(
