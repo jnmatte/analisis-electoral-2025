@@ -104,6 +104,22 @@ def main(argv: Sequence[str] | None = None) -> None:
         _print_winners("Electos en el escenario", merged_winners)
         _print_merged_breakdown(merged_label, merged_breakdown)
 
+        if not has_changes:
+            continue
+
+        print(f"\n=== {circ.circunscripcion_label} ({circ.seats} escaños) ===")
+        _print_pact_table(circ.pacts)
+
+        print("\n> Resultado oficial con los pactos originales:")
+        _print_allocation(original_allocation, circ.pacts)
+
+        print("\n> Escenario si se unen {0}:".format(" + ".join(sorted(pact_codes))))
+        _print_allocation(merged_allocation, merged_pacts)
+
+        _print_winners("Electos oficiales", original_winners)
+        _print_winners("Electos en el escenario", merged_winners)
+        _print_merged_breakdown(merged_label, merged_breakdown)
+
     if processed_any:
         _print_summary(
             summary_official,
