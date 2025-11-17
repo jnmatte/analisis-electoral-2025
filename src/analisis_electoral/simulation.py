@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 import sys
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence, Tuple
@@ -192,18 +193,87 @@ def _record_pact_names(pact_names: Dict[str, str], pacts: Iterable[PactResult]) 
         pact_names.setdefault(pact.code, pact.name)
 
 
+@dataclass(frozen=True)
+class _SubpactResult:
+    code: str
+    votes: int
+
+
 def _winners_by_pact(pacts: Iterable[PactResult], allocation: Dict[str, int]) -> Dict[str, List[CandidateResult]]:
     winners: Dict[str, List[CandidateResult]] = {}
     pact_lookup = {pact.code: pact for pact in pacts}
     for code, seats in allocation.items():
         pact = pact_lookup.get(code)
-        if not pact:
+        if not pact or seats <= 0:
             continue
-        if seats <= 0:
-            continue
-        ordered_candidates = sorted(pact.candidates, key=lambda c: (-c.votes, c.number))
-        winners[code] = ordered_candidates[:seats]
+        winners[code] = _select_winners_from_pact(pact, seats)
     return winners
+
+
+def _select_winners_from_pact(pact: PactResult, seats: int) -> List[CandidateResult]:
+    if not pact.candidates or seats <= 0:
+        return []
+    subpact_seats = _subpact_allocation(pact, seats)
+    if not subpact_seats:
+        return _top_candidates(pact.candidates, seats)
+
+    candidates_by_subpact = _group_candidates_by_subpact(pact.candidates)
+    selected: List[CandidateResult] = []
+    for subpact_code, subpact_seats_count in subpact_seats.items():
+        if subpact_seats_count <= 0:
+            continue
+        ordered = _top_candidates(candidates_by_subpact.get(subpact_code, []), subpact_seats_count)
+        selected.extend(ordered)
+
+    selected.sort(key=_candidate_sort_key)
+    return selected[:seats]
+
+
+def _subpact_allocation(pact: PactResult, seats: int) -> Dict[str, int]:
+    if seats <= 0:
+        return {}
+    totals: Counter[str] = Counter()
+    for candidate in pact.candidates:
+        code = _candidate_subpact_code(candidate)
+        if not code:
+            continue
+        totals[code] += max(candidate.votes, 0)
+
+    subpacts = [
+        _SubpactResult(code=code, votes=votes)
+        for code, votes in totals.items()
+        if votes > 0
+    ]
+    if not subpacts:
+        return {}
+    return dhondt_allocation(subpacts, seats)
+
+
+def _group_candidates_by_subpact(candidates: Iterable[CandidateResult]) -> Dict[str, List[CandidateResult]]:
+    grouped: Dict[str, List[CandidateResult]] = defaultdict(list)
+    for candidate in candidates:
+        code = _candidate_subpact_code(candidate)
+        grouped[code].append(candidate)
+    return grouped
+
+
+def _top_candidates(candidates: Iterable[CandidateResult], seats: int) -> List[CandidateResult]:
+    ordered = sorted(candidates, key=_candidate_sort_key)
+    return ordered[:seats]
+
+
+def _candidate_subpact_code(candidate: CandidateResult) -> str:
+    if candidate.party:
+        stripped = candidate.party.strip()
+        if stripped:
+            return stripped
+    if candidate.pact_code:
+        return f"{candidate.pact_code} (sin partido)"
+    return "(sin partido)"
+
+
+def _candidate_sort_key(candidate: CandidateResult) -> tuple[int, int, str]:
+    return (-candidate.votes, candidate.number, candidate.name)
 
 
 def _has_result_changes(
