@@ -19,6 +19,7 @@ class CandidateResult:
     votes: int
     percentage: float | None
     elected: bool
+    pact_code: str | None = None
 
 
 @dataclass
@@ -92,7 +93,7 @@ def _parse_file(path: Path) -> CircunscripcionResult:
 
         candidate_field = row.get("Unnamed: 1")
         if isinstance(candidate_field, str) and candidate_field.strip():
-            candidate = _build_candidate(candidate_field, row)
+            candidate = _build_candidate(candidate_field, row, current_pact.code)
             current_pact.candidates.append(candidate)
 
     return CircunscripcionResult(
@@ -142,7 +143,7 @@ def _build_pact(label: str, row: pd.Series) -> PactResult:
     )
 
 
-def _build_candidate(raw_value: str, row: pd.Series) -> CandidateResult:
+def _build_candidate(raw_value: str, row: pd.Series, pact_code: str) -> CandidateResult:
     match = re.match(r"(\d+)\s+(.*)", raw_value.strip())
     if match:
         number = int(match.group(1))
@@ -161,6 +162,7 @@ def _build_candidate(raw_value: str, row: pd.Series) -> CandidateResult:
         votes=_parse_int(row.get("Votos")),
         percentage=_parse_percentage(row.get("Porcentaje")),
         elected=elected,
+        pact_code=pact_code,
     )
 
 
