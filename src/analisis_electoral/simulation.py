@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+import re
 import sys
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence, Tuple
@@ -332,10 +333,25 @@ def _candidate_subpact_code(candidate: CandidateResult) -> str:
     if candidate.party:
         stripped = candidate.party.strip()
         if stripped:
-            return stripped
+            normalized = _normalize_independent_party_label(stripped)
+            if normalized:
+                return normalized
     if candidate.pact_code:
         return f"{candidate.pact_code} (sin partido)"
     return "(sin partido)"
+
+
+def _normalize_independent_party_label(label: str) -> str:
+    if not label:
+        return label
+    match = _IND_PARTY_PATTERN.match(label)
+    if match:
+        remainder = match.group(1).strip()
+        if remainder:
+            return remainder
+    if label.upper() == "IND":
+        return "IND"
+    return label
 
 
 def _candidate_sort_key(candidate: CandidateResult) -> tuple[int, int, str]:
@@ -566,3 +582,5 @@ def _pact_votes(pacts: Sequence[PactResult], code: str) -> float | None:
 
 if __name__ == "__main__":
     main()
+_IND_PARTY_PATTERN = re.compile(r"^IND\s*-\s*(.+)$", re.IGNORECASE)
+

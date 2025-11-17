@@ -1,5 +1,5 @@
 from analisis_electoral.data_loader import CandidateResult, PactResult
-from analisis_electoral.simulation import _select_winners_from_pact
+from analisis_electoral.simulation import _candidate_subpact_code, _select_winners_from_pact
 
 
 def _candidate(number: int, name: str, party: str, votes: int, pact_code: str = "C") -> CandidateResult:
@@ -41,3 +41,15 @@ def test_subpact_underallocation_fills_remaining_seats():
         "Yasna Provoste",
     ]
     assert len(winners) == 2
+
+
+def test_independent_with_party_counts_towards_party_subpact():
+    candidate = _candidate(1, "Loreto Carvajal", "IND - PPD", 50000)
+
+    assert _candidate_subpact_code(candidate) == "PPD"
+
+
+def test_plain_independent_remains_its_own_subpact():
+    candidate = _candidate(1, "Laura Iturriaga", "IND", 42000)
+
+    assert _candidate_subpact_code(candidate) == "IND"
