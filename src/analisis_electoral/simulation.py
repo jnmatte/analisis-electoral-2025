@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
+from collections import Counter, defaultdict
 import sys
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence, Tuple
@@ -52,6 +52,8 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     summary_official: Counter[str] = Counter()
     summary_scenario: Counter[str] = Counter()
+    summary_breakdowns: dict[str, Counter[str]] = defaultdict(Counter)
+    pact_names: dict[str, str] = {}
     processed_any = False
 
     for circ in circunscripciones:
@@ -61,12 +63,15 @@ def main(argv: Sequence[str] | None = None) -> None:
         _print_pact_table(circ.pacts)
 
         original_allocation = dhondt_allocation(circ.pacts, circ.seats)
+        _record_pact_names(pact_names, circ.pacts)
         try:
             merged_pacts, merged_label = _merge_pacts(circ.pacts, pact_codes)
         except ValueError as exc:
             print(f"\nNo fue posible crear el escenario: {exc}")
             continue
         merged_allocation = dhondt_allocation(merged_pacts, circ.seats)
+        for pact in merged_pacts:
+            pact_names.setdefault(pact.code, pact.name)
         processed_any = True
 
         print("\n> Resultado oficial con los pactos originales:")
@@ -80,13 +85,16 @@ def main(argv: Sequence[str] | None = None) -> None:
 
         _print_winners("Electos oficiales", original_winners)
         _print_winners("Electos en el escenario", merged_winners)
-        _print_merged_breakdown(merged_label, merged_winners)
+        merged_breakdown = _merged_breakdown_counts(merged_label, merged_winners)
+        _print_merged_breakdown(merged_label, merged_breakdown)
+        if merged_breakdown:
+            summary_breakdowns[merged_label].update(merged_breakdown)
 
         summary_official.update(original_allocation)
         summary_scenario.update(merged_allocation)
 
     if processed_any:
-        _print_summary(summary_official, summary_scenario)
+        _print_summary(summary_official, summary_scenario, pact_names, summary_breakdowns)
 
 
 def _print_pact_table(pacts: Iterable[PactResult]) -> None:
@@ -146,6 +154,11 @@ def _merge_pacts(pacts: Sequence[PactResult], codes: set[str]) -> Tuple[List[Pac
     return result, merged_label
 
 
+def _record_pact_names(pact_names: Dict[str, str], pacts: Iterable[PactResult]) -> None:
+    for pact in pacts:
+        pact_names.setdefault(pact.code, pact.name)
+
+
 def _winners_by_pact(pacts: Iterable[PactResult], allocation: Dict[str, int]) -> Dict[str, List[CandidateResult]]:
     winners: Dict[str, List[CandidateResult]] = {}
     pact_lookup = {pact.code: pact for pact in pacts}
@@ -170,28 +183,37 @@ def _print_winners(title: str, winners: Dict[str, List[CandidateResult]]) -> Non
         print(f"   {code}: {formatted}")
 
 
-def _print_merged_breakdown(
+def _merged_breakdown_counts(
     merged_label: str, winners: Dict[str, List[CandidateResult]]
-) -> None:
+) -> Counter[str]:
     selected = winners.get(merged_label)
+    breakdown: Counter[str] = Counter()
     if not selected:
-        return
-    breakdown: Dict[str, List[CandidateResult]] = {}
+        return breakdown
     for candidate in selected:
         pact_code = candidate.pact_code or "(sin código)"
-        breakdown.setdefault(pact_code, []).append(candidate)
+        breakdown[pact_code] += 1
+    return breakdown
+
+
+def _print_merged_breakdown(merged_label: str, breakdown: Counter[str]) -> None:
+    if not breakdown:
+        return
     print(f"      Detalle interno de {merged_label}:")
-    for code in sorted(breakdown):
-        formatted = ", ".join(f"{c.name} ({c.votes:,} votos)" for c in breakdown[code])
-        print(f"         - {code}: {formatted}")
+    for code, count in sorted(breakdown.items(), key=lambda item: (-item[1], item[0])):
+        suffix = "escaños" if count != 1 else "escaño"
+        print(f"         - {code}: {count} {suffix}")
 
 
 def _print_summary(
-    summary_official: Counter[str], summary_scenario: Counter[str]
+    summary_official: Counter[str],
+    summary_scenario: Counter[str],
+    pact_names: Dict[str, str],
+    summary_breakdowns: Dict[str, Counter[str]],
 ) -> None:
     print("\n=== Resumen consolidado ===")
-    _print_summary_block("Reparto oficial", summary_official)
-    _print_summary_block("Escenario unificado", summary_scenario)
+    _print_summary_block("Reparto oficial", summary_official, pact_names)
+    _print_summary_block("Escenario unificado", summary_scenario, pact_names)
 
     print("\nVariación de escaños:")
     all_codes = sorted(set(summary_official) | set(summary_scenario))
@@ -200,16 +222,33 @@ def _print_summary(
         scenario = summary_scenario.get(code, 0)
         diff = scenario - original
         sign = "+" if diff > 0 else ""
-        print(f"   {code}: {original} -> {scenario} ({sign}{diff})")
+        label = _format_pact_label(code, pact_names)
+        breakdown = summary_breakdowns.get(code)
+        extra = ""
+        if breakdown:
+            parts = ", ".join(
+                f"{src}: {count}"
+                for src, count in sorted(breakdown.items(), key=lambda item: (-item[1], item[0]))
+            )
+            extra = f" [{parts}]"
+        print(f"   {label}: {original} -> {scenario} ({sign}{diff}){extra}")
 
 
-def _print_summary_block(title: str, data: Counter[str]) -> None:
+def _print_summary_block(title: str, data: Counter[str], pact_names: Dict[str, str]) -> None:
     print(f"\n{title}:")
     if not data:
         print("   (sin datos)")
         return
     for code, seats in sorted(data.items(), key=lambda item: (-item[1], item[0])):
-        print(f"   {code}: {seats} escaños")
+        label = _format_pact_label(code, pact_names)
+        print(f"   {label}: {seats} escaños")
+
+
+def _format_pact_label(code: str, pact_names: Dict[str, str]) -> str:
+    name = pact_names.get(code)
+    if name and name != code:
+        return f"{code} ({name})"
+    return code
 
 
 if __name__ == "__main__":
