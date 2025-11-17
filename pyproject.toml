@@ -1,0 +1,13 @@
+[project]
+name = "analisis-electoral-2025"
+version = "0.1.0"
+description = "Simulador simple para escenarios senatoriales usando el método D'Hondt"
+authors = [{name = "Analista", email = "analista@example.com"}]
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.2",
+    "openpyxl>=3.1",
+]
+
+[project.scripts]
+simular-pactos = "analisis_electoral.simulation:main"
