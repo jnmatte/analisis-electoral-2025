@@ -3,9 +3,14 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Protocol
 
-from .data_loader import PactResult
+
+class SupportsDhondt(Protocol):
+    """Entidades que pueden ser utilizadas en el método D'Hondt."""
+
+    code: str
+    votes: int
 
 
 @dataclass(frozen=True)
@@ -18,7 +23,7 @@ class DhondtSeat:
     raw_votes: int
 
 
-def dhondt_allocation(pacts: Iterable[PactResult], seats: int) -> Dict[str, int]:
+def dhondt_allocation(pacts: Iterable[SupportsDhondt], seats: int) -> Dict[str, int]:
     """Entrega el número de escaños que obtiene cada pacto."""
 
     quotients: List[DhondtSeat] = []
@@ -41,4 +46,4 @@ def dhondt_allocation(pacts: Iterable[PactResult], seats: int) -> Dict[str, int]
     return dict(counter)
 
 
-__all__ = ["dhondt_allocation", "DhondtSeat"]
+__all__ = ["dhondt_allocation", "DhondtSeat", "SupportsDhondt"]
