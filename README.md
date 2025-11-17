@@ -30,11 +30,13 @@ Parámetros importantes:
   apuntar a `Inputs/Diputados`).
 - `--circ`: IDs de circunscripción a revisar (si no se especifica se utilizan todas).
 - `--pact-a` y `--pact-b`: códigos de los pactos a unir (por ejemplo `C`, `J`, etc.).
+- `--print-all`: muestra todas las circunscripciones/distritos aunque el resultado no cambie
+  (por defecto solo se imprimen los que presentan variaciones).
 
 La salida incluye:
 
-1. El listado de pactos encontrados en la circunscripción/distrito y su votación, sólo en los
-   casos donde la alianza modificaría el resultado.
+1. El listado de pactos encontrados en la circunscripción/distrito y su votación (por defecto
+   solo en los casos donde la alianza modificaría el resultado).
 2. La asignación de escaños calculada con los pactos originales.
 3. El escenario alternativo con ambos pactos unidos.
 4. El detalle de candidaturas electas en cada caso, ordenadas por votos.
