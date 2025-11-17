@@ -1,0 +1,12 @@
+README.md
+pyproject.toml
+src/analisis_electoral/__init__.py
+src/analisis_electoral/data_loader.py
+src/analisis_electoral/dhondt.py
+src/analisis_electoral/simulation.py
+src/analisis_electoral_2025.egg-info/PKG-INFO
+src/analisis_electoral_2025.egg-info/SOURCES.txt
+src/analisis_electoral_2025.egg-info/dependency_links.txt
+src/analisis_electoral_2025.egg-info/entry_points.txt
+src/analisis_electoral_2025.egg-info/requires.txt
+src/analisis_electoral_2025.egg-info/top_level.txt

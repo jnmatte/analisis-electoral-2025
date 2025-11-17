@@ -1,0 +1,2 @@
+[console_scripts]
+simular-pactos = analisis_electoral.simulation:main
