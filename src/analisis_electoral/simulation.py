@@ -65,6 +65,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     summary_breakdowns: dict[str, Counter[str]] = defaultdict(Counter)
     pact_names: dict[str, str] = {}
     processed_any = False
+    national_entries: List[_NationalScenario] = []
+    national_baseline_seats = 0
+    national_scenario_seats = 0
+    national_merged_votes = 0.0
 
     for circ in circunscripciones:
         if circ_filter and circ.circunscripcion_id not in circ_filter:
@@ -98,6 +102,15 @@ def main(argv: Sequence[str] | None = None) -> None:
             combined_original_seats,
             merged_seats,
         )
+        national_entries.append(
+            _NationalScenario(
+                merged_pacts=tuple(merged_pacts),
+                merged_label=merged_label,
+                seats=circ.seats,
+            )
+        )
+        national_baseline_seats += combined_original_seats
+        national_scenario_seats += merged_seats
 
         merged_breakdown = _merged_breakdown_counts(merged_label, merged_winners)
         if merged_breakdown:
@@ -109,6 +122,9 @@ def main(argv: Sequence[str] | None = None) -> None:
             merged_allocation, merged_label, merged_breakdown
         )
         summary_scenario_by_origin.update(distributed_allocation)
+        merged_votes = _pact_votes(merged_pacts, merged_label)
+        if merged_votes:
+            national_merged_votes += merged_votes
 
         if not should_print:
             continue
@@ -122,7 +138,6 @@ def main(argv: Sequence[str] | None = None) -> None:
         print("\n> Escenario si se unen {0}:".format(" + ".join(sorted(pact_codes))))
         _print_allocation(merged_allocation, merged_pacts)
 
-        merged_votes = _pact_votes(merged_pacts, merged_label)
         _print_indifference_loss(indifference_loss, merged_votes)
 
         _print_winners("Electos oficiales", original_winners)
@@ -132,6 +147,10 @@ def main(argv: Sequence[str] | None = None) -> None:
         if not has_changes:
             print("\n   No hay cambios respecto al resultado oficial.")
 
+    national_loss = _national_indifference_loss(
+        national_entries, national_baseline_seats, national_scenario_seats
+    )
+
     if processed_any:
         _print_summary(
             summary_official,
@@ -139,6 +158,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             summary_scenario_by_origin,
             pact_names,
             summary_breakdowns,
+            national_loss,
+            national_merged_votes,
         )
 
 
@@ -220,6 +241,13 @@ class _SubpactResult:
 class _PactVotes:
     code: str
     votes: float
+
+
+@dataclass(frozen=True)
+class _NationalScenario:
+    merged_pacts: Sequence[PactResult]
+    merged_label: str
+    seats: int
 
 
 def _winners_by_pact(pacts: Iterable[PactResult], allocation: Dict[str, int]) -> Dict[str, List[CandidateResult]]:
@@ -391,6 +419,8 @@ def _print_summary(
     summary_scenario_by_origin: Counter[str],
     pact_names: Dict[str, str],
     summary_breakdowns: Dict[str, Counter[str]],
+    national_loss: float,
+    national_votes: float,
 ) -> None:
     print("\n=== Resumen consolidado ===")
     _print_summary_block("Reparto oficial", summary_official, pact_names)
@@ -405,6 +435,8 @@ def _print_summary(
         sign = "+" if diff > 0 else ""
         label = _format_pact_label(code, pact_names)
         print(f"   {label}: {original} -> {scenario} ({sign}{diff})")
+
+    _print_national_indifference(national_loss, national_votes)
 
 
 def _print_summary_block(title: str, data: Counter[str], pact_names: Dict[str, str]) -> None:
@@ -422,6 +454,19 @@ def _format_pact_label(code: str, pact_names: Dict[str, str]) -> str:
     if name and name != code:
         return f"{code} ({name})"
     return code
+
+
+def _print_national_indifference(loss: float, total_votes: float) -> None:
+    percentage = loss * 100
+    print("\nPérdida indiferente nacional:")
+    if percentage <= 0:
+        print("   0.00%")
+        return
+    text = f"   {percentage:.2f}%"
+    if total_votes > 0:
+        lost_votes = round(total_votes * loss)
+        text += f" (~{lost_votes:,} votos)"
+    print(text)
 
 
 def _indifference_loss_percentage(
@@ -443,6 +488,33 @@ def _indifference_loss_percentage(
         allocation = dhondt_allocation(scenario, seats)
         seats_mid = allocation.get(merged_label, 0)
         if seats_mid > baseline_seats:
+            low = mid
+        else:
+            high = mid
+        if high - low <= tolerance:
+            break
+    return high
+
+
+def _national_indifference_loss(
+    circunscripciones: Sequence[_NationalScenario],
+    baseline_total: int,
+    current_total: int,
+) -> float:
+    if not circunscripciones or current_total <= baseline_total:
+        return 0.0
+
+    low = 0.0
+    high = 1.0
+    tolerance = 1e-4
+    for _ in range(60):
+        mid = (low + high) / 2
+        total = 0
+        for circ in circunscripciones:
+            scenario = _pacts_with_vote_loss(circ.merged_pacts, circ.merged_label, mid)
+            allocation = dhondt_allocation(scenario, circ.seats)
+            total += allocation.get(circ.merged_label, 0)
+        if total > baseline_total:
             low = mid
         else:
             high = mid
