@@ -73,7 +73,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         original_allocation = dhondt_allocation(circ.pacts, circ.seats)
         _record_pact_names(pact_names, circ.pacts)
         try:
-            merged_pacts, merged_label = _merge_pacts(circ.pacts, pact_codes)
+            merged_pacts, merged_label, merged_original_codes = _merge_pacts(
+                circ.pacts, pact_codes
+            )
         except ValueError as exc:
             print(f"\nNo fue posible crear el escenario: {exc}")
             continue
@@ -86,6 +88,16 @@ def main(argv: Sequence[str] | None = None) -> None:
         merged_winners = _winners_by_pact(merged_pacts, merged_allocation)
         has_changes = _has_result_changes(original_winners, merged_winners)
         should_print = args.print_all or has_changes
+
+        combined_original_seats = _combined_seats(original_allocation, merged_original_codes)
+        merged_seats = merged_allocation.get(merged_label, 0)
+        indifference_loss = _indifference_loss_percentage(
+            merged_pacts,
+            merged_label,
+            circ.seats,
+            combined_original_seats,
+            merged_seats,
+        )
 
         merged_breakdown = _merged_breakdown_counts(merged_label, merged_winners)
         if merged_breakdown:
@@ -109,6 +121,9 @@ def main(argv: Sequence[str] | None = None) -> None:
 
         print("\n> Escenario si se unen {0}:".format(" + ".join(sorted(pact_codes))))
         _print_allocation(merged_allocation, merged_pacts)
+
+        merged_votes = _pact_votes(merged_pacts, merged_label)
+        _print_indifference_loss(indifference_loss, merged_votes)
 
         _print_winners("Electos oficiales", original_winners)
         _print_winners("Electos en el escenario", merged_winners)
@@ -147,7 +162,9 @@ def _print_allocation(allocation: Dict[str, int], pacts: Iterable[PactResult]) -
         print(f"   {code}: {name} -> {seats} escaños ({votes:,} votos)")
 
 
-def _merge_pacts(pacts: Sequence[PactResult], codes: set[str]) -> Tuple[List[PactResult], str]:
+def _merge_pacts(
+    pacts: Sequence[PactResult], codes: set[str]
+) -> Tuple[List[PactResult], str, List[str]]:
     merged_candidates: List[CandidateResult] = []
     merged_votes = 0
     merged_names: List[str] = []
@@ -181,7 +198,7 @@ def _merge_pacts(pacts: Sequence[PactResult], codes: set[str]) -> Tuple[List[Pac
         candidates=sorted(merged_candidates, key=lambda c: (-c.votes, c.number)),
     )
     result.append(merged_pact)
-    return result, merged_label
+    return result, merged_label, merged_codes
 
 
 def _record_pact_names(pact_names: Dict[str, str], pacts: Iterable[PactResult]) -> None:
@@ -189,10 +206,20 @@ def _record_pact_names(pact_names: Dict[str, str], pacts: Iterable[PactResult]) 
         pact_names.setdefault(pact.code, pact.name)
 
 
+def _combined_seats(allocation: Dict[str, int], codes: Iterable[str]) -> int:
+    return sum(allocation.get(code, 0) for code in codes)
+
+
 @dataclass(frozen=True)
 class _SubpactResult:
     code: str
     votes: int
+
+
+@dataclass(frozen=True)
+class _PactVotes:
+    code: str
+    votes: float
 
 
 def _winners_by_pact(pacts: Iterable[PactResult], allocation: Dict[str, int]) -> Dict[str, List[CandidateResult]]:
@@ -319,6 +346,14 @@ def _print_merged_breakdown(merged_label: str, breakdown: Counter[str]) -> None:
         print(f"         - {code}: {count} {suffix}")
 
 
+def _print_indifference_loss(indifference_loss: float, merged_votes: float | None) -> None:
+    if merged_votes is None or merged_votes <= 0:
+        return
+    percentage = indifference_loss * 100
+    lost_votes = round(merged_votes * indifference_loss)
+    print(f"   Pérdida indiferente: {percentage:.2f}% (~{lost_votes:,} votos)")
+
+
 def _distribute_allocation_by_origin(
     allocation: Dict[str, int], merged_label: str, breakdown: Counter[str]
 ) -> Counter[str]:
@@ -368,6 +403,74 @@ def _format_pact_label(code: str, pact_names: Dict[str, str]) -> str:
     if name and name != code:
         return f"{code} ({name})"
     return code
+
+
+def _indifference_loss_percentage(
+    merged_pacts: Sequence[PactResult],
+    merged_label: str,
+    seats: int,
+    baseline_seats: int,
+    current_merged_seats: int,
+) -> float:
+    if current_merged_seats <= baseline_seats:
+        return 0.0
+
+    low = 0.0
+    high = 1.0
+    tolerance = 1e-4
+    for _ in range(60):
+        mid = (low + high) / 2
+        scenario = _pacts_with_vote_loss(merged_pacts, merged_label, mid)
+        allocation = dhondt_allocation(scenario, seats)
+        seats_mid = allocation.get(merged_label, 0)
+        if seats_mid > baseline_seats:
+            low = mid
+        else:
+            high = mid
+        if high - low <= tolerance:
+            break
+    return high
+
+
+def _pacts_with_vote_loss(
+    merged_pacts: Sequence[PactResult], merged_label: str, loss_fraction: float
+) -> List[_PactVotes]:
+    if not 0.0 <= loss_fraction <= 1.0:
+        raise ValueError("El porcentaje de pérdida debe estar entre 0 y 100%")
+
+    merged_votes = None
+    others: List[PactResult] = []
+    other_votes_total = 0.0
+    for pact in merged_pacts:
+        if pact.code == merged_label:
+            merged_votes = float(pact.votes)
+        else:
+            others.append(pact)
+            other_votes_total += float(pact.votes)
+
+    if merged_votes is None:
+        raise ValueError("No se encontró el pacto unificado dentro del escenario")
+
+    loss_votes = merged_votes * loss_fraction
+    new_votes = merged_votes - loss_votes
+    scenario: List[_PactVotes] = [_PactVotes(code=merged_label, votes=new_votes)]
+
+    if loss_votes <= 0 or other_votes_total <= 0:
+        scenario.extend(_PactVotes(code=pact.code, votes=float(pact.votes)) for pact in others)
+        return scenario
+
+    for pact in others:
+        share = float(pact.votes) / other_votes_total if other_votes_total else 0.0
+        gained = loss_votes * share
+        scenario.append(_PactVotes(code=pact.code, votes=float(pact.votes) + gained))
+    return scenario
+
+
+def _pact_votes(pacts: Sequence[PactResult], code: str) -> float | None:
+    for pact in pacts:
+        if pact.code == code:
+            return float(pact.votes)
+    return None
 
 
 if __name__ == "__main__":
