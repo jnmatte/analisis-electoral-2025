@@ -242,11 +242,26 @@ def _select_winners_from_pact(pact: PactResult, seats: int) -> List[CandidateRes
 
     candidates_by_subpact = _group_candidates_by_subpact(pact.candidates)
     selected: List[CandidateResult] = []
+    selected_keys: set[tuple[int, int, str]] = set()
     for subpact_code, subpact_seats_count in subpact_seats.items():
         if subpact_seats_count <= 0:
             continue
         ordered = _top_candidates(candidates_by_subpact.get(subpact_code, []), subpact_seats_count)
-        selected.extend(ordered)
+        for candidate in ordered:
+            key = _candidate_identity(candidate)
+            if key in selected_keys:
+                continue
+            selected_keys.add(key)
+            selected.append(candidate)
+
+    if len(selected) < seats:
+        remaining_needed = seats - len(selected)
+        fallback_candidates = [
+            candidate
+            for candidate in _top_candidates(pact.candidates, len(pact.candidates))
+            if _candidate_identity(candidate) not in selected_keys
+        ]
+        selected.extend(fallback_candidates[:remaining_needed])
 
     selected.sort(key=_candidate_sort_key)
     return selected[:seats]
@@ -297,6 +312,10 @@ def _candidate_subpact_code(candidate: CandidateResult) -> str:
 
 def _candidate_sort_key(candidate: CandidateResult) -> tuple[int, int, str]:
     return (-candidate.votes, candidate.number, candidate.name)
+
+
+def _candidate_identity(candidate: CandidateResult) -> tuple[int, int, str]:
+    return (candidate.number, candidate.votes, candidate.name)
 
 
 def _has_result_changes(
