@@ -26,7 +26,7 @@ from analisis_electoral.dhondt import dhondt_allocation
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Simula cómo cambiaría la asignación de escaños si dos pactos senatoriales "
+            "Simula cómo cambiaría la asignación de escaños si dos pactos electorales "
             "hubieran competido juntos."
         )
     )
@@ -34,7 +34,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         "--inputs",
         type=Path,
         default=Path("Inputs/Senadores"),
-        help="Carpeta que contiene los archivos Excel oficiales",
+        help="Carpeta que contiene los archivos Excel oficiales (Senadores o Diputados)",
     )
     parser.add_argument(
         "--circ",
@@ -52,6 +52,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     summary_official: Counter[str] = Counter()
     summary_scenario: Counter[str] = Counter()
+    summary_scenario_by_origin: Counter[str] = Counter()
     summary_breakdowns: dict[str, Counter[str]] = defaultdict(Counter)
     pact_names: dict[str, str] = {}
     processed_any = False
@@ -59,8 +60,6 @@ def main(argv: Sequence[str] | None = None) -> None:
     for circ in circunscripciones:
         if circ_filter and circ.circunscripcion_id not in circ_filter:
             continue
-        print(f"\n=== {circ.circunscripcion_label} ({circ.seats} escaños) ===")
-        _print_pact_table(circ.pacts)
 
         original_allocation = dhondt_allocation(circ.pacts, circ.seats)
         _record_pact_names(pact_names, circ.pacts)
@@ -74,27 +73,45 @@ def main(argv: Sequence[str] | None = None) -> None:
             pact_names.setdefault(pact.code, pact.name)
         processed_any = True
 
+        original_winners = _winners_by_pact(circ.pacts, original_allocation)
+        merged_winners = _winners_by_pact(merged_pacts, merged_allocation)
+        has_changes = _has_result_changes(original_winners, merged_winners)
+
+        merged_breakdown = _merged_breakdown_counts(merged_label, merged_winners)
+        if merged_breakdown:
+            summary_breakdowns[merged_label].update(merged_breakdown)
+
+        summary_official.update(original_allocation)
+        summary_scenario.update(merged_allocation)
+        distributed_allocation = _distribute_allocation_by_origin(
+            merged_allocation, merged_label, merged_breakdown
+        )
+        summary_scenario_by_origin.update(distributed_allocation)
+
+        if not has_changes:
+            continue
+
+        print(f"\n=== {circ.circunscripcion_label} ({circ.seats} escaños) ===")
+        _print_pact_table(circ.pacts)
+
         print("\n> Resultado oficial con los pactos originales:")
         _print_allocation(original_allocation, circ.pacts)
 
         print("\n> Escenario si se unen {0}:".format(" + ".join(sorted(pact_codes))))
         _print_allocation(merged_allocation, merged_pacts)
 
-        original_winners = _winners_by_pact(circ.pacts, original_allocation)
-        merged_winners = _winners_by_pact(merged_pacts, merged_allocation)
-
         _print_winners("Electos oficiales", original_winners)
         _print_winners("Electos en el escenario", merged_winners)
-        merged_breakdown = _merged_breakdown_counts(merged_label, merged_winners)
         _print_merged_breakdown(merged_label, merged_breakdown)
-        if merged_breakdown:
-            summary_breakdowns[merged_label].update(merged_breakdown)
-
-        summary_official.update(original_allocation)
-        summary_scenario.update(merged_allocation)
 
     if processed_any:
-        _print_summary(summary_official, summary_scenario, pact_names, summary_breakdowns)
+        _print_summary(
+            summary_official,
+            summary_scenario,
+            summary_scenario_by_origin,
+            pact_names,
+            summary_breakdowns,
+        )
 
 
 def _print_pact_table(pacts: Iterable[PactResult]) -> None:
@@ -173,6 +190,21 @@ def _winners_by_pact(pacts: Iterable[PactResult], allocation: Dict[str, int]) ->
     return winners
 
 
+def _has_result_changes(
+    original_winners: Dict[str, List[CandidateResult]],
+    merged_winners: Dict[str, List[CandidateResult]],
+) -> bool:
+    return _winner_signature(original_winners) != _winner_signature(merged_winners)
+
+
+def _winner_signature(winners: Dict[str, List[CandidateResult]]) -> Counter[tuple[str, int, str]]:
+    signature: Counter[tuple[str, int, str]] = Counter()
+    for candidates in winners.values():
+        for candidate in candidates:
+            signature[(candidate.pact_code or "", candidate.number, candidate.name)] += 1
+    return signature
+
+
 def _print_winners(title: str, winners: Dict[str, List[CandidateResult]]) -> None:
     print(f"\n{title}:")
     if not winners:
@@ -205,9 +237,22 @@ def _print_merged_breakdown(merged_label: str, breakdown: Counter[str]) -> None:
         print(f"         - {code}: {count} {suffix}")
 
 
+def _distribute_allocation_by_origin(
+    allocation: Dict[str, int], merged_label: str, breakdown: Counter[str]
+) -> Counter[str]:
+    distributed: Counter[str] = Counter()
+    for code, seats in allocation.items():
+        if code == merged_label and breakdown:
+            distributed.update(breakdown)
+        else:
+            distributed[code] += seats
+    return distributed
+
+
 def _print_summary(
     summary_official: Counter[str],
     summary_scenario: Counter[str],
+    summary_scenario_by_origin: Counter[str],
     pact_names: Dict[str, str],
     summary_breakdowns: Dict[str, Counter[str]],
 ) -> None:
@@ -216,22 +261,14 @@ def _print_summary(
     _print_summary_block("Escenario unificado", summary_scenario, pact_names)
 
     print("\nVariación de escaños:")
-    all_codes = sorted(set(summary_official) | set(summary_scenario))
+    all_codes = sorted(set(summary_official) | set(summary_scenario_by_origin))
     for code in all_codes:
         original = summary_official.get(code, 0)
-        scenario = summary_scenario.get(code, 0)
+        scenario = summary_scenario_by_origin.get(code, 0)
         diff = scenario - original
         sign = "+" if diff > 0 else ""
         label = _format_pact_label(code, pact_names)
-        breakdown = summary_breakdowns.get(code)
-        extra = ""
-        if breakdown:
-            parts = ", ".join(
-                f"{src}: {count}"
-                for src, count in sorted(breakdown.items(), key=lambda item: (-item[1], item[0]))
-            )
-            extra = f" [{parts}]"
-        print(f"   {label}: {original} -> {scenario} ({sign}{diff}){extra}")
+        print(f"   {label}: {original} -> {scenario} ({sign}{diff})")
 
 
 def _print_summary_block(title: str, data: Counter[str], pact_names: Dict[str, str]) -> None:

@@ -1,4 +1,4 @@
-"""Lectura y normalización de los resultados senatoriales desde Excel."""
+"""Lectura y normalización de los resultados electorales desde Excel."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -38,7 +38,7 @@ class PactResult:
 
 @dataclass
 class CircunscripcionResult:
-    """Resultados de una circunscripción senatorial."""
+    """Resultados de una circunscripción senatorial o distrito de diputados."""
 
     circunscripcion_id: str
     circunscripcion_label: str
@@ -107,18 +107,32 @@ def _parse_file(path: Path) -> CircunscripcionResult:
 def _extract_seats(path: Path) -> int:
     df = pd.read_excel(path, header=None)
     for value in df.iloc[:, 0].dropna():
-        if isinstance(value, str) and "senadores a elegir" in value.lower():
-            match = re.search(r"(\d+)", value)
-            if match:
-                return int(match.group(1))
+        if not isinstance(value, str):
+            continue
+        value_lower = value.lower()
+        match = re.search(r"(\d+)\s+(senadores|diputados)\s+a\s+elegir", value_lower)
+        if match:
+            return int(match.group(1))
+        generic_match = re.search(r"(\d+)", value_lower)
+        if generic_match and ("senadores" in value_lower or "diputados" in value_lower):
+            return int(generic_match.group(1))
     raise ValueError(f"No pude determinar el número de escaños para {path}")
 
 
 def _extract_circunscripcion_metadata(path: Path) -> tuple[str, str]:
-    match = re.search(r"CIRCUNSCRIPCIÓN SENATORIAL\s*(\d+)", path.name)
-    circ_id = match.group(1) if match else path.stem
-    circ_label = f"Circunscripción Senatorial {circ_id}"
-    return circ_id, circ_label
+    name = path.name.upper()
+    senate_match = re.search(r"CIRCUNSCRIPCIÓN SENATORIAL\s*(\d+)", name)
+    if senate_match:
+        circ_id = senate_match.group(1)
+        return circ_id, f"Circunscripción Senatorial {circ_id}"
+
+    district_match = re.search(r"DISTRITO\s*(\d+)", name)
+    if district_match:
+        circ_id = district_match.group(1)
+        return circ_id, f"Distrito {circ_id}"
+
+    circ_id = path.stem
+    return circ_id, circ_id
 
 
 def _is_summary_row(value: str) -> bool:
